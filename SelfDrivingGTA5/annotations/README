@@ -1,0 +1,3 @@
+parse_csv.py: parse csv files in top views into pkls, prepared for training and validation.
+
+parse_test.py: generate test pkls for validation and test.

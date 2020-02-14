@@ -1,17 +1,11 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jan 17 00:53:23 2020
-
-@author: Jason
-"""
-
 import os
 import numpy as np
 import copy
-import random
-import sys
 import cv2
 import pickle
+import argparse
+
+import mmcv
 
 import torch
 import torch.nn as nn
@@ -20,106 +14,21 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
 from torch.autograd import Variable
 
-UNDRIVABLE = 0
-DRIVABLE = 1
+import tools.utils_extra as utils
 
-OS = sys.argv[1]
 torch.backends.cudnn.enabled = True
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-split_ratio = 0.9
-
-# Get all the data
-if OS == "win":
-    root_folder = "C:/Users/kezew/Documents/VisionDataMixed/visiondata{}" 
-    CONFIG_FILE = "D:/mmdetection/configs/cascade_rcnn_x101_64x4d_fpn_1x_feat.py"
-    CHECKPOINT_FILE = "D:/mmdetection/checkpoints/cascade_rcnn_x101_64x4d_fpn_1x_20181218-e2dc376a.pth"
-elif OS == "lnx":
-    root_folder = "/home/keze/GTAV/VisionDataMixed/visiondata{}"
-    CONFIG_FILE = "/home/keze/Codes/mmdetection/configs/cascade_rcnn_x101_64x4d_fpn_1x_feat.py"
-    CHECKPOINT_FILE = "/home/keze/Codes/mmdetection/checkpoints/cascade_rcnn_x101_64x4d_fpn_1x_20181218-e2dc376a.pth"
-    
-# Get mmdetection
-from mmdet.apis import init_detector, inference_detector
-det_model = init_detector(CONFIG_FILE, CHECKPOINT_FILE, device)
-
-folder_paths = [root_folder.format(i) for i in range(0, 10)]
-file_list = list() 
-for folder_path in folder_paths:
-    file_paths = os.listdir(folder_path)
-    for file_path in file_paths:
-        file_list.append(os.path.join(folder_path, file_path))
-random.shuffle(file_list) 
-
-def process_one_item(file_path):
-    arr = pickle.load(open(file_path, 'rb'))
-    
-    if type(arr) == list:
-        im, label = arr[0], arr[1]
-    else:
-        im = arr
-        label = True
-
-    im = cv2.cvtColor(im, cv2.COLOR_BGRA2RGB)
-
-    result = inference_detector(det_model, im)
-    # print(result)
-    result[1] = np.concatenate((result[1], result[3]), axis=0)
-
-    if len(result[1]) > 0:
-        playerBbox = result[1][0]
-        bbox_int = playerBbox.astype(np.int32)
-        cv2.rectangle(im, (bbox_int[0], bbox_int[1]), (bbox_int[2], bbox_int[3]), (255, 255, 255), 3)
-        margin_top = 100
-        margin_side = 150
-        
-        left_top = [bbox_int[0] - margin_side, bbox_int[1] - margin_top]
-        right_bottom = [bbox_int[2] + margin_side, bbox_int[1]]
-        
-        # make sure nothing is out of bounds
-        if left_top[0] < 0:
-            right_bottom[0] -= left_top[0]
-            left_top[0] = 0
-        
-        top_region = np.copy(im[left_top[1]:right_bottom[1], left_top[0]:right_bottom[0]]) / 255
-        top_region = cv2.resize(top_region, (224, 224))
-    else:
-        # if the player is not detected, we still need to feed in an image
-        width = im.shape[1]
-        left_x = round(width * 0.5 - 112)
-        right_x = round(width * 0.5 + 112)
-        top_region = np.copy(im[:224, left_x:right_x, :]) / 255
-
-    cv2.imshow('im', im)
-    cv2.waitKey(1500)
-    cv2.destroyAllWindows()
-    
-    tensor = np.zeros((3, 224, 224), dtype='float32')
-    for i in range(3):
-        tensor[i] = top_region[:,:,i]
-    
-    tensor = Variable(torch.from_numpy(tensor)).to(device)
-		
-    return tensor, int(label)
-    
-class TestDataset(Dataset):
-    def __init__(self):
-        self.file_list = file_list[round(len(file_list) * split_ratio):]
-        print('Testing Sample Number: ', len(self.file_list))
-
-    def __len__(self):
-        return len(self.file_list)
-    
-    def __getitem__(self, idx):
-        return process_one_item(self.file_list[idx])
+DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+TRAIN_TEST_SPLIT = 0.9
 
 class TrainDataset(Dataset):
-    def __init__(self, split, train_val_ratio=0.9):
-        self.file_list = file_list[:round(len(file_list) * split_ratio)]
+    def __init__(self, file_list, mmdet_cfg, dataset_type='train', train_val_ratio=0.9, train_test_split=TRAIN_TEST_SPLIT):
+        self.file_list = file_list[:round(len(file_list) * train_test_split)]
+        self.cfg = mmdet_cfg
         
-        if split == 'train':
+        if dataset_type == 'train':
             self.file_list = self.file_list[:round(train_val_ratio * len(self.file_list))]
             print('Training Sample Number: ', len(self.file_list))
-        elif split == 'val':
+        elif dataset_type == 'val':
             self.file_list = self.file_list[round(train_val_ratio * len(self.file_list)):]
             print('Validating Sample Number: ', len(self.file_list))
             
@@ -127,7 +36,48 @@ class TrainDataset(Dataset):
         return len(self.file_list)
     
     def __getitem__(self, idx):
-        return process_one_item(self.file_list[idx]) 
+        arr = pickle.load(open(self.file_list[idx], 'rb'))
+
+        if type(arr) == list:
+            img, label = arr[0], arr[1]
+        else:
+            img = arr
+            label = True
+        
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        data = utils.prepare_data(img, 
+            self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio'])
+        data['img'][0] =  data['img'][0].to(DEVICE)
+        res = utils.processOneImg(self.cfg['model'], data, DEVICE)
+
+        return res, int(label)
+
+class TestDataset(Dataset):
+    def __init__(self, file_list, mmdet_cfg, train_test_split=TRAIN_TEST_SPLIT):
+        self.file_list = file_list[round(len(file_list) * train_test_split):]
+        self.cfg = mmdet_cfg
+
+        print('Testing Sample Number: ', len(self.file_list))
+
+    def __len__(self):
+        return len(self.file_list)
+    
+    def __getitem__(self, idx):
+        arr = pickle.load(open(self.file_list[idx], 'rb'))
+
+        if type(arr) == list:
+            img, label = arr[0], arr[1]
+        else:
+            img = arr
+            label = True
+        
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        data = utils.prepare_data(img, 
+            self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio']) 
+        data['img'][0] =  data['img'][0].to(DEVICE)
+        res = utils.processOneImg(self.cfg['model'], data, DEVICE)
+
+        return res, int(label)
 
 class Net(nn.Module):
     def __init__(self):
@@ -159,7 +109,7 @@ def trainModel(model, trainLoader, valLoader, criterion, optimizer, numEpochs=5)
                 for batch_idx, (top, label) in enumerate(trainLoader):  
                     outputs = model(top)
 
-                    labels = Variable(label).to(device)
+                    labels = Variable(label).to(DEVICE)
                     loss = criterion(outputs, labels)
 
                     optimizer.zero_grad()
@@ -201,22 +151,32 @@ def testModel(model, testLoader):
 
     return np.mean(accuracy_pre) * np.mean(accuracy_rec) / (np.mean(accuracy_pre) + np.mean(accuracy_rec))
 
-if __name__ == "__main__":        
-    train_loader = DataLoader(dataset=TrainDataset('train'), batch_size=32, shuffle=True, num_workers=0)
-    validate_loader = DataLoader(dataset=TrainDataset('val'), batch_size=32, shuffle=False, num_workers=0)
-    test_loader = DataLoader(dataset=TestDataset(), batch_size=32, shuffle=False, num_workers=0)
+if __name__ == "__main__":      
+    args = utils.parse_args()  
 
+    # Initialize mmdetection and get paths to the data folders
+    mmdet_cfg = utils.initModels(DEVICE)
+    file_list = utils.getFiles()
+
+    # Get data loaders    
+    training_loader = DataLoader(dataset=TrainDataset(file_list, mmdet_cfg), 
+        batch_size=32, shuffle=True, num_workers=0)
+    validation_loader = DataLoader(dataset=TrainDataset(file_list, mmdet_cfg, 'val'), 
+        batch_size=32, shuffle=False, num_workers=0)
+    testing_loader = DataLoader(dataset=TestDataset(file_list, mmdet_cfg), 
+        batch_size=32, shuffle=False, num_workers=0)
+
+    # Initialize neural net
     net = Net()
-    net = net.to(device)
-    
+    net = net.to(DEVICE)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(net.parameters())
     
     # Trains the model
     bestAcc = 0
     bestModel = None
-    currValAcc = trainModel(net, train_loader, validate_loader, criterion, optimizer, numEpochs=10)
-    currTestAcc = testModel(net, test_loader)
+    currValAcc = trainModel(net, training_loader, validation_loader, criterion, optimizer)
+    currTestAcc = testModel(net, testing_loader)
     if currValAcc > bestAcc:
         # Updates and saves the current best model
         bestModel = copy.deepcopy(net)
@@ -225,9 +185,5 @@ if __name__ == "__main__":
 
     # Tests the best model on the testing set
     print('Best Results:')
-    testModel(bestModel, test_loader)
+    testModel(bestModel, testing_loader)
     torch.save(bestModel, 'model_best.pth')
-
-        
-            
-        

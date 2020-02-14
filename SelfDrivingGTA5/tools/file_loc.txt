@@ -1,0 +1,9 @@
+[WINDOWS]
+root_folder=C:/Users/kezew/Documents/VisionDataMixed/visiondata{}
+CONFIG_FILE=D:/mmdetection/configs/cascade_rcnn_x101_64x4d_fpn_1x_feat.py
+CHECKPOINT_FILE=D:/mmdetection/checkpoints/cascade_rcnn_x101_64x4d_fpn_1x_20181218-e2dc376a.pth
+
+[LINUX]
+root_folder=/home/keze/GTAV/VisionDataMixed/visiondata{}
+CONFIG_FILE=/home/keze/Codes/mmdetection/configs/cascade_rcnn_x101_64x4d_fpn_1x_feat.py
+CHECKPOINT_FILE=/home/keze/Codes/mmdetection/checkpoints/cascade_rcnn_x101_64x4d_fpn_1x_20181218-e2dc376a.pth
