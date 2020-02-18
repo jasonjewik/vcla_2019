@@ -98,6 +98,8 @@ def processOneImg(model, img_data, device):
             result[j] = np.zeros( (0, 5), dtype='float32' )
 #    show_result(curr_img, curr_result, model.CLASSES, out_file= osp.join(drawnFolderPath, imgName + '.jpg'))
     
+    show_result(img_data['img'][0], result, ['Player', 'Bus', 'Truck'])
+
     return result
 
 def showFrameTime(previousTime):
@@ -209,7 +211,7 @@ def imshow_det_bboxes(img,
                       score_thr=0,
                       bbox_color='green',
                       text_color='green',
-                      thickness=1,
+                      thickness=5,
                       font_scale=0.5,
                       show=True,
                       win_name="show",
@@ -255,7 +257,15 @@ def imshow_det_bboxes(img,
     bbox_color = color_val(bbox_color)
     text_color = color_val(text_color)
 
-    for bbox, label in zip(bboxes, labels):        
+    img = img.cpu()
+    img = img.numpy().squeeze()
+    img = np.transpose(img, (1,2,0))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    for bbox, label in zip(bboxes, labels):    
+        if label > 2:
+            break
+
         bbox_int = bbox.astype(np.int32)
         left_top = (bbox_int[0], bbox_int[1])
         right_bottom = (bbox_int[2], bbox_int[3])

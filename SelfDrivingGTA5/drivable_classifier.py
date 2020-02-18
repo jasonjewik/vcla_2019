@@ -47,8 +47,11 @@ class TrainDataset(Dataset):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         data = utils.prepare_data(img, 
             self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio'])
-        data['img'][0] =  data['img'][0].to(DEVICE)
-        res = utils.processOneImg(self.cfg['model'], data, DEVICE)
+        data['img'][0] = data['img'][0].to(DEVICE)
+        res = np.asarray(utils.processOneImg(self.cfg['model'], data, DEVICE))
+
+        if len(res[1] > 0):
+            print(res[1][0])
 
         return res, int(label)
 
@@ -75,7 +78,7 @@ class TestDataset(Dataset):
         data = utils.prepare_data(img, 
             self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio']) 
         data['img'][0] =  data['img'][0].to(DEVICE)
-        res = utils.processOneImg(self.cfg['model'], data, DEVICE)
+        res = np.asarray(utils.processOneImg(self.cfg['model'], data, DEVICE))
 
         return res, int(label)
 
