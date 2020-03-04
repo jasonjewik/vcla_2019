@@ -142,7 +142,7 @@ def processOneImg(model, img_data, device, ori_img):
     topRegion = ori_img[left_top[1]:right_bottom[1], left_top[0]:right_bottom[0]]
     return topRegion
 
-def cacheResult(res, label, orig_fpath):
+def cacheResult(data, orig_fpath):
     cache_root = 'D:\\det_results'
     if not osp.exists(cache_root):
         os.mkdir(cache_root)
@@ -152,7 +152,7 @@ def cacheResult(res, label, orig_fpath):
     fpath = osp.join(cache_root, fname)
 
     with open(fpath, 'wb') as fid:
-        pickle.dump([res, label], fid)
+        pickle.dump(data, fid)
 
 def showFrameTime(previousTime):
     print('Total time used ' + str(time.time() - previousTime) + ' seconds.')

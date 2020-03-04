@@ -43,7 +43,7 @@ class TrainDataset(Dataset):
             return cache_res[0], cache_res[1]
 
         arr = pickle.load(open(filepath, 'rb'))
-        img, label = arr[0], arr[1]
+        img, label, move = arr[0], arr[1], arr[2]
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         data = utils.prepare_data(img, 
@@ -52,7 +52,7 @@ class TrainDataset(Dataset):
         res = utils.processOneImg(self.cfg['model'], data, DEVICE, img)
         res = utils.preprocessInput(res)
 
-        utils.cacheResult(res, label, filepath)
+        utils.cacheResult([res, label, move], filepath)
 
         return res, label
 
@@ -179,11 +179,10 @@ if __name__ == "__main__":
     # Trains the model
     numEpochs = 100
     bestAcc = 0
-    bestModel = None
+    bestModel = copy.deepcopy(net)
     for epoch in range(numEpochs):
         print(f'Epoch: {epoch + 1}/{numEpochs}')
         currValAcc = trainModel(net, training_loader, validation_loader, criterion, optimizer)
-        currTestAcc = testModel(net, training_loader)
         if currValAcc > bestAcc:
             # Updates and saves the current best model
             bestModel = copy.deepcopy(net)

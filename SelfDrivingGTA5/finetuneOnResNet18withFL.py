@@ -186,7 +186,7 @@ if __name__ == '__main__':
     # Trains the model
     numEpochs = 100
     bestAcc = 0
-    bestModel = None
+    bestModel = copy.deepcopy(resNet)
     for epoch in range(numEpochs):
         print(f'Epoch: {epoch + 1}/{numEpochs}')
         currValAcc = trainModel(resNet, trainLoader, valLoader, criterion, optimizer)
