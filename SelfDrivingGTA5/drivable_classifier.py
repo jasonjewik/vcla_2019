@@ -36,24 +36,25 @@ class TrainDataset(Dataset):
         return len(self.file_list)
     
     def __getitem__(self, idx):
-        arr = pickle.load(open(self.file_list[idx], 'rb'))
+        filepath = self.file_list[idx]
+        cache_res = utils.checkCache(filepath)
 
-        if type(arr) == list:
-            img, label = arr[0], arr[1]
-        else:
-            img = arr
-            label = True
-        
+        if cache_res is not None:
+            return cache_res[0], cache_res[1]
+
+        arr = pickle.load(open(filepath, 'rb'))
+        img, label = arr[0], arr[1]
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
         data = utils.prepare_data(img, 
             self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio'])
         data['img'][0] = data['img'][0].to(DEVICE)
-        res = np.asarray(utils.processOneImg(self.cfg['model'], data, DEVICE))
+        res = utils.processOneImg(self.cfg['model'], data, DEVICE, img)
+        res = utils.preprocessInput(res)
 
-        if len(res[1] > 0):
-            print(res[1][0])
+        utils.cacheResult(res, label, filepath)
 
-        return res, int(label)
+        return res, label
 
 class TestDataset(Dataset):
     def __init__(self, file_list, mmdet_cfg, train_test_split=TRAIN_TEST_SPLIT):
@@ -66,30 +67,32 @@ class TestDataset(Dataset):
         return len(self.file_list)
     
     def __getitem__(self, idx):
-        arr = pickle.load(open(self.file_list[idx], 'rb'))
+        filepath = self.file_list[idx]
+        cache_res = utils.checkCache(filepath)
 
-        if type(arr) == list:
-            img, label = arr[0], arr[1]
-        else:
-            img = arr
-            label = True
+        if cache_res is not None:
+            return cache_res[0], cache_res[1]
+
+        arr = pickle.load(open(self.file_list[idx], 'rb'))
+        img, label = arr[0], arr[1]
         
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         data = utils.prepare_data(img, 
             self.cfg['img_transform'], self.cfg['img_scale'], self.cfg['keep_ratio']) 
         data['img'][0] =  data['img'][0].to(DEVICE)
-        res = np.asarray(utils.processOneImg(self.cfg['model'], data, DEVICE))
+        res = utils.processOneImg(self.cfg['model'], data, DEVICE, img)
+        res = utils.preprocessInput(res)
 
-        return res, int(label)
+        return res, label
 
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fctop = nn.Linear(44944, 500)
-        self.fc2 = nn.Linear(500, 100)
+        self.conv2 = nn.Conv2d(6, 16, 5, 5)
+        self.fctop = nn.Linear(1680, 300)
+        self.fc2 = nn.Linear(300, 100)
         self.fc3 = nn.Linear(100, 2)
         
     def forward(self, top):
@@ -103,21 +106,19 @@ class Net(nn.Module):
 
         return output
     
-def trainModel(model, trainLoader, valLoader, criterion, optimizer, numEpochs=5):
+def trainModel(model, trainLoader, valLoader, criterion, optimizer):
     for phase in ['train', 'val']:
         if phase == 'train':
-            model.train()
-            for epoch in range(numEpochs):
-                print(f'Epoch: {epoch + 1}/{numEpochs}')
-                for batch_idx, (top, label) in enumerate(trainLoader):  
-                    outputs = model(top)
+            model.train()            
+            for batch_idx, (top, label) in enumerate(trainLoader):
+                outputs = model(Variable(top).to(DEVICE))
 
-                    labels = Variable(label).to(DEVICE)
-                    loss = criterion(outputs, labels)
+                labels = Variable(label).to(DEVICE)
+                loss = criterion(outputs, labels)
 
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()      
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()      
         elif phase == 'val':
             accuracy = testModel(model, valLoader)
             return accuracy
@@ -130,7 +131,7 @@ def testModel(model, testLoader):
     smpSum_rec = np.zeros((2,), dtype='float32')
     
     for batch_idx, (top, labels) in enumerate(testLoader):
-        outputs = model(top)
+        outputs = model(Variable(top).to(DEVICE))
         outputs = outputs.cpu().detach().numpy()
         labels = labels.numpy()
 
@@ -145,6 +146,8 @@ def testModel(model, testLoader):
                accuracy_rec[labels[i]] += 1
             smpSum_rec[labels[i]] += 1
 
+    print(accuracy_pre, smpSum_pre, accuracy_rec, smpSum_rec)
+
     for i in range(2):
         accuracy_pre[i] /= smpSum_pre[i]
         accuracy_rec[i] /= smpSum_rec[i]
@@ -155,36 +158,37 @@ def testModel(model, testLoader):
     return np.mean(accuracy_pre) * np.mean(accuracy_rec) / (np.mean(accuracy_pre) + np.mean(accuracy_rec))
 
 if __name__ == "__main__":      
-    args = utils.parse_args()  
-
     # Initialize mmdetection and get paths to the data folders
     mmdet_cfg = utils.initModels(DEVICE)
     file_list = utils.getFiles()
 
     # Get data loaders    
     training_loader = DataLoader(dataset=TrainDataset(file_list, mmdet_cfg), 
-        batch_size=32, shuffle=True, num_workers=0)
+        batch_size=16, shuffle=True, num_workers=0)
     validation_loader = DataLoader(dataset=TrainDataset(file_list, mmdet_cfg, 'val'), 
-        batch_size=32, shuffle=False, num_workers=0)
+        batch_size=16, shuffle=False, num_workers=0)
     testing_loader = DataLoader(dataset=TestDataset(file_list, mmdet_cfg), 
-        batch_size=32, shuffle=False, num_workers=0)
+        batch_size=16, shuffle=False, num_workers=0)
 
     # Initialize neural net
     net = Net()
     net = net.to(DEVICE)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(net.parameters())
+    optimizer = optim.Adam(net.parameters(), lr=0.000001)
     
     # Trains the model
+    numEpochs = 100
     bestAcc = 0
     bestModel = None
-    currValAcc = trainModel(net, training_loader, validation_loader, criterion, optimizer)
-    currTestAcc = testModel(net, testing_loader)
-    if currValAcc > bestAcc:
-        # Updates and saves the current best model
-        bestModel = copy.deepcopy(net)
-        # Updates and saves the curent best accuracy
-        bestAcc = currValAcc
+    for epoch in range(numEpochs):
+        print(f'Epoch: {epoch + 1}/{numEpochs}')
+        currValAcc = trainModel(net, training_loader, validation_loader, criterion, optimizer)
+        currTestAcc = testModel(net, training_loader)
+        if currValAcc > bestAcc:
+            # Updates and saves the current best model
+            bestModel = copy.deepcopy(net)
+            # Updates and saves the curent best accuracy
+            bestAcc = currValAcc
 
     # Tests the best model on the testing set
     print('Best Results:')

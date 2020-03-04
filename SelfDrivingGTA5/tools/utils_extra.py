@@ -2,7 +2,10 @@ import os
 import os.path as osp
 import argparse
 import pickle
-from .color import color_val
+if os.getcwd() == 'C:\\Users\\kezew\\Documents\\vcla_2019\\SelfDrivingGTA5\\tools':
+    from color import color_val
+else:
+    from .color import color_val
 
 import cv2
 import time
@@ -78,16 +81,28 @@ def getFiles():
     
     return file_list
 
-def processOneImg(model, img_data, device):
+def checkCache(orig_fpath):
+    cache_root = 'D:\\det_results'
+    
+    if (not osp.exists(cache_root)):
+        return None
+
+    components = orig_fpath.split('\\')
+    fname = components[5] + components[6]
+    fpath = osp.join(cache_root, fname)
+
+    if (not osp.exists(fpath)):
+        return None
+
+    return pickle.load(open(fpath, 'rb'))
+
+
+def processOneImg(model, img_data, device, ori_img):
     torch_device = torch.device(device)
     torch.cuda.set_device(torch_device)
-    
-#    img_data = model_input[1]
-#    img_data['img'][0] = img_data['img'][0].to(device)
 
     with torch.no_grad():
         result = model(return_loss=False, rescale=True, **img_data)
-#        result = [[]]
 
         result[1] = np.concatenate( (result[1], result[3] ), axis=0 )
         result[2] = np.concatenate( (result[2], result[5] ), axis=0 ) # bus
@@ -96,11 +111,48 @@ def processOneImg(model, img_data, device):
             if j == 0 or j == 1 or j == 2 or j == 9 or j == 11:
                 continue
             result[j] = np.zeros( (0, 5), dtype='float32' )
-#    show_result(curr_img, curr_result, model.CLASSES, out_file= osp.join(drawnFolderPath, imgName + '.jpg'))
-    
-    show_result(img_data['img'][0], result, ['Player', 'Bus', 'Truck'])
 
-    return result
+    """
+    CLASSES
+    ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 
+    'truck', 'boat', 'traffic_light', 'fire_hydrant', 'stop_sign', 
+    'parking_meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 
+    'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella',
+    'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard', 
+    'sports_ball', 'kite', 'baseball_bat', 'baseball_glove', 'skateboard', 
+    'surfboard', 'tennis_racket', 'bottle', 'wine_glass', 'cup', 'fork', 
+    'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange', 
+    'broccoli', 'carrot', 'hot_dog', 'pizza', 'donut', 'cake', 'chair', 
+    'couch', 'potted_plant', 'bed', 'dining_table', 'toilet', 'tv', 
+    'laptop', 'mouse', 'remote', 'keyboard', 'cell_phone', 'microwave', 
+    'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase', 
+    'scissors', 'teddy_bear', 'hair_drier', 'toothbrush']
+    """
+
+    if result[1].size == 0:        
+        bbox_int = np.array([550, 430, 720, 710]) # just a guess
+    else:
+        bbox_int = result[1][0].astype(np.int32)
+    
+    margin_top = 200
+    margin_side = 100
+    left_top = (max(bbox_int[0] - margin_side, 0), max(bbox_int[1] - margin_top, 0))
+    right_bottom = (min(bbox_int[2] + margin_side, ori_img.shape[1]), min(bbox_int[1], ori_img.shape[0]))
+
+    topRegion = ori_img[left_top[1]:right_bottom[1], left_top[0]:right_bottom[0]]
+    return topRegion
+
+def cacheResult(res, label, orig_fpath):
+    cache_root = 'D:\\det_results'
+    if not osp.exists(cache_root):
+        os.mkdir(cache_root)
+
+    components = orig_fpath.split('\\')
+    fname = components[5] + components[6]
+    fpath = osp.join(cache_root, fname)
+
+    with open(fpath, 'wb') as fid:
+        pickle.dump([res, label], fid)
 
 def showFrameTime(previousTime):
     print('Total time used ' + str(time.time() - previousTime) + ' seconds.')
@@ -108,10 +160,11 @@ def showFrameTime(previousTime):
 
 def preprocessInput(image, MODEL_INPUT_SIZE=(320, 160)):
     newImage = cv2.resize(image, MODEL_INPUT_SIZE)
-    newImage = np.expand_dims(newImage, axis=0)
+    # newImage = np.expand_dims(newImage, axis=0)
+    newImage = newImage.T
     newImage = newImage / 255
 
-    return newImage
+    return newImage.astype(np.float32)
 
 def postProcessOutput(image, MODEL_INPUT_SIZE=(320, 160), NEW_SIZE=(800, 450)):
     #Bring image from 0-1 to 0-255 and remove last axis
@@ -257,11 +310,6 @@ def imshow_det_bboxes(img,
     bbox_color = color_val(bbox_color)
     text_color = color_val(text_color)
 
-    img = img.cpu()
-    img = img.numpy().squeeze()
-    img = np.transpose(img, (1,2,0))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
     for bbox, label in zip(bboxes, labels):    
         if label > 2:
             break
@@ -281,11 +329,11 @@ def imshow_det_bboxes(img,
 
     if show:
         cv2.imshow(win_name, img)
-        cv2.waitKey(wait_time)
+        # cv2.waitKey(wait_time)
     if out_file is not None:
         cv2.imwrite(out_file, img)
 
-def show_result(img, result, class_names, out_file=None, wait_time=1):
+def show_result(img, result, class_names, out_file=None, wait_time=0):
     bboxes = np.vstack(result)
     labels = [
         np.full(bbox.shape[0], i, dtype=np.int32)
@@ -556,11 +604,12 @@ def prepare_data_gpu(img, img_transform, scale_factor, device='cuda:0'):
 
 def prepare_data(img, img_transform, img_scale, keep_ratio):
     ori_shape = img.shape
+
     img, img_shape, pad_shape, scale_factor = img_transform(
         img,
         scale=img_scale,
         keep_ratio=keep_ratio)
-#    img = to_tensor(img).to(device).unsqueeze(0)
+
     img = to_tensor(img).unsqueeze(0)
     img_meta = [
         dict(
@@ -772,3 +821,8 @@ def check_side_of_obj_first(player_center, obj_bbox):
 #         out_file=out_file,
 #         wait_time = 0
 #         )
+
+def timeout(num):
+    for i in range(num):
+        print(num - i)
+        time.sleep(1)
