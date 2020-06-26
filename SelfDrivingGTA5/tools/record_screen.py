@@ -4,19 +4,20 @@ import keyboard
 
 import os
 import os.path as osp
+
 import pickle
 
-SCREEN_REGION = (320, 192, 1600, 912)
+SCREEN_REGION = (321, 192, 1600, 912)
 FORWARD = 0
 LEFT = 1
 RIGHT = 2
 BACKWARD = 3
 NOT_MOVING = 4
 
-FRAMES_TO_COLLECT = 1000
+FRAMES_TO_COLLECT = 20000
 
 if __name__ == '__main__':
-    parent_path = "C:/Users/kezew/Documents/VisionDataMaster"
+    parent_path = "E:\\GitHub\\vcla_2019\\image_data"
     if not osp.exists(parent_path):
         os.mkdir(parent_path)
 

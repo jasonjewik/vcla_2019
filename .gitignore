@@ -1,2 +1,3 @@
 */*.pth
 .vscode/*
+image_data/*
