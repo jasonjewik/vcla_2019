@@ -17,10 +17,10 @@ else:
 if imnum == "a":
     for i in range(0, len(file_list)):
         f = pickle.load(open(os.path.join(DIRECTORY, file_list[i]), 'rb'))
-        data = f[0]
-        cv2.imshow('window', data)
+        data = f
+        cv2.imshow(f'window {i}', data)
         cv2.waitKey(500)
-        cv2.destroyWindow('window')
+        cv2.destroyWindow(f'window {i}')
     cv2.waitKey(0)
     sys.exit()
 
