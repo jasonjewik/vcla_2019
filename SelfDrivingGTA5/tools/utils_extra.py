@@ -1,16 +1,19 @@
 import os
 import os.path as osp
+abspath = os.path.abspath(__file__)
+dname = os.path.dirname(abspath)
+os.chdir(dname)
+
+from color import color_val
+
 import argparse
 import pickle
-if os.getcwd() == 'C:\\Users\\kezew\\Documents\\vcla_2019\\SelfDrivingGTA5\\tools':
-    from color import color_val
-else:
-    from .color import color_val
 
 import cv2
 import time
 import numpy as np
 #from mmcv.parallel import DataContainer as DC
+"""
 import mmcv
 from mmdet.datasets.utils import to_tensor
 from sklearn.metrics.pairwise import cosine_similarity
@@ -20,6 +23,7 @@ from mmdet.apis import init_detector, inference_detector
 from mmcv.runner import load_checkpoint
 from mmdet.datasets import get_dataset
 from mmdet.core import get_classes
+"""
 
 import torch
 
